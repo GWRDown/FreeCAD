@@ -1,0 +1,412 @@
+from PyQt5.Qt import QFileDialog
+__title__   = "Spreadsheet_assistant"
+__author__  = "Him"
+__version__ = "0.0.01"
+__date__    = "2019-04-01"
+
+__Comment__ = "This macro does stuff with spreadsheets"
+__Status__ = "unknown"
+__Requires__ = "FreeCAD 0.18"
+
+import sys
+sys.path.append("'C:\\Program Files\\FreeCAD 0.18\\lib'")
+
+import FreeCAD
+import FreeCADGui 
+
+from PySide2 import *
+from PySide import *
+
+import string
+
+#============- variables used to convert integer col/row to alphaNumeric
+alphabetList = list(string.ascii_uppercase)
+
+alphaList = [] # is filled with A, B, C,.... AA, AB, AC,...
+for i in range(0,26):
+    alphaList.append(alphabetList[i])
+
+for i in range(0,26):
+    for j in range(0,26):
+        alphaList.append(alphabetList[i] + alphabetList[j])
+
+
+#================================================
+#====== class to hold and control access/updates to docos/sheets/cells
+#====== also controls key fields used to access the sheet data
+class dataClass():
+    def __init__(self):
+        self.selectedAction = ""
+
+        self.useContent = False
+        self.useAlias = False
+        self.useFormatting = False
+
+        self.fromSheet = ""
+        self.toSheet = ""
+
+        self.fromDoco = ""
+        self.toDoco = ""
+
+        self.sheetView = []
+
+        self.fromCellsByRows = {}
+        self.toCellsByRows = {}
+        
+        self.fromSheetsGroup = QtGui.QButtonGroup()
+        self.toSheetsGroup = QtGui.QButtonGroup()
+        
+        self.fromRB = QtGui.QRadioButton
+        self.toRB = QtGui.QRadioButton
+
+        self.activeSheets = {}
+        
+                 
+        for i in FreeCADGui.getMainWindow().findChild(QtGui.QMdiArea).subWindowList():
+            if i.widget().metaObject().className() == "Gui::View3DInventor":
+                docoName =  i.widget().windowTitle()
+                ii = docoName.find(" :")                
+                docoName = docoName[:ii]
+            if i.widget().metaObject().className() == "SpreadsheetGui::SheetView":
+                xx = QFileDialog.getOpenFileName(None,
+                                                 i.widget().windowTitle(),
+                                                 None,
+                                                 None,
+                                                 None);
+                FreeCAD.Console.PrintMessage(xx)
+                sheetName = i.widget().windowTitle()
+                ii = sheetName.find("[")
+                sheetName = sheetName[:ii]
+                if docoName in self.activeSheets:
+                    docoList = self.activeSheets.get(docoName)
+                else:
+                    docoList = {}  
+                docoList[sheetName] = i
+                self.activeSheets[docoName] = docoList
+
+    def setOptions(self, opt1, opt2, opt3):
+        self.useContent = opt1
+        self.useAlias = opt2
+        self.useFormatting = opt3
+
+    def setAction(self, actionToSet):       
+        self.selectedAction = actionToSet
+
+
+    def getSelection(self, whichType):
+#====== retrieves selected cells for the sheet and sets them in a dictionary
+        if whichType == "from":
+            sheetName = self.fromSheet
+            docoName = self.fromDoco
+        if whichType == "to":
+            sheetName = self.toSheet 
+            docoName = self.toDoco
+                         
+        selectedCells = []
+        
+        try:
+            docoList = self.activeSheets.get(docoName)
+            i = docoList[sheetName]
+            selectedCells = i.widget().findChild(QtGui.QTableView)
+            selectedSheet = FreeCAD.getDocument(docoName).getObjectsByLabel(sheetName)[0]
+        except:
+            return
+
+        self.rowList = {}
+        self.cellByRowList = {}
+
+        for i in selectedCells.selectedIndexes():
+            oneCell = {}
+            cellRow = str(i.row()+1)
+            cellColumn = alphaList[i.column()]
+            cellName = cellColumn + cellRow
+
+            oneCell["cellRow"] = i.row() 
+            oneCell["cellCol"] = i.column()
+            oneCell["alias"] = selectedSheet.getAlias(cellName)
+            oneCell["contents"] = selectedSheet.getContents(cellName)
+            oneCell["style"] = selectedSheet.getStyle(cellName)
+            oneCell["foreGround"] = selectedSheet.getForeground(cellName)
+            oneCell["backGround"] = selectedSheet.getBackground(cellName)
+            oneCell["displayUnit"] = selectedSheet.getDisplayUnit(cellName)
+            oneCell["alignment"] = selectedSheet.getAlignment(cellName)
+         
+            if cellRow in self.cellByRowList:
+                self.rowList = self.cellByRowList.get(cellRow)
+                self.rowList[cellName] = oneCell
+            else:
+                self.rowList = {}
+                self.rowList[cellName] = oneCell
+
+            self.cellByRowList[cellRow] = self.rowList
+
+        if len(self.cellByRowList) > 0:
+            if whichType == "from":
+                self.fromCellsByRows = self.cellByRowList
+
+            if whichType == "to":
+                self.toCellsByRows = self.cellByRowList
+
+    def setToSheet(self): 
+        toRow = list(self.toCellsByRows.values())[0]
+        toCell = list(toRow.keys())[0]
+        toColII = colFirst = toRow.get(toCell).get("cellCol")
+        toRowII = toRow.get(toCell).get("cellRow") + 1
+
+        selectedToSheet = FreeCAD.getDocument(self.toDoco).getObjectsByLabel(self.toSheet)[0]         
+
+        for fromRow in self.fromCellsByRows:
+            cellRow = self.fromCellsByRows[fromRow]
+            for aCell in cellRow: 
+                fromCell = cellRow[aCell]
+                toCell = alphaList[toColII] + str(toRowII)
+
+                if self.useContent:          
+                    if not(fromCell["displayUnit"] == None):
+                        selectedToSheet.set(toCell, fromCell["displayUnit"])
+          
+                    if not(fromCell["contents"] == None):
+                        cellContent = fromCell["contents"][:1].capitalize() + fromCell["contents"][1:]
+                        selectedToSheet.set(toCell, cellContent)
+
+                if self.useFormatting: 
+                    if not(fromCell["style"] == None):
+                        selectedToSheet.setStyle(toCell, fromCell["style"])
+
+                    if not(fromCell["alignment"] == None):
+                        selectedToSheet.setAlignment(toCell, fromCell["alignment"])
+
+                    if not(fromCell["foreGround"] == None):
+                        selectedToSheet.setForeground(toCell, fromCell["foreGround"])
+
+                    if not(fromCell["backGround"] == None):
+                        selectedToSheet.setBackground(toCell, fromCell["backGround"])
+
+                if self.useAlias:
+                    try:
+                        if not(fromCell["alias"] == None):
+                            cellAlias = fromCell["alias"][:1].lower() + fromCell["alias"][1:]
+                            selectedToSheet.setAlias(toCell, cellAlias)
+                            selectedToSheet.setBackground(toCell, (1.0, 1.0, 1.0, 0.0))
+                    except:
+                        cellAlias = "err" + cellAlias                    
+                        FreeCAD.Console.PrintMessage("\n alias error sheet:" + self.toSheet + " cell:" + toCell + " " + cellAlias)
+                        selectedToSheet.setAlias(toCell, cellAlias)
+                        selectedToSheet.setBackground(toCell, (1.0, 0.0, 0.0, 1.0))
+
+                
+                toColII += 1
+                
+            toColII = colFirst
+            toRowII += 1
+
+        selectedToSheet.recompute()
+
+    def deleteSelection(self):
+        FreeCAD.setActiveDocument(self.fromDoco)
+        selectedFromSheet = FreeCAD.ActiveDocument.getObjectsByLabel(self.fromSheet)[0]
+
+        for aRow in self.fromCellsByRows:
+            cellRow = self.fromCellsByRows[aRow]
+            for aCell in cellRow: 
+                if self.useContent and self.useFormatting and self.useAlias:
+                    selectedFromSheet.clear(aCell, True)
+                else:
+                    if self.useContent:
+                        selectedFromSheet.set(aCell, "")
+                    if self.useFormatting:
+                        selectedFromSheet.setAlignment(aCell, "")
+                        selectedFromSheet.setForeground(aCell, "")
+                        selectedFromSheet.setBackground(aCell, "")
+                    if self.useAlias:
+                        selectedFromSheet.setAlias(aCell, "")
+                        selectedFromSheet.setBackground(aCell, "")
+
+        selectedFromSheet.recompute()
+    
+    def printIt(self):
+        FreeCAD.Console.PrintMessage("\n========= Print It =============")
+        FreeCAD.Console.PrintMessage("\nself.selectedAction " + self.selectedAction)
+        FreeCAD.Console.PrintMessage("\nall sheets ")
+        FreeCAD.Console.PrintMessage("\nself.fromSheet " + self.fromSheet)
+        FreeCAD.Console.PrintMessage("\nself.toSheet " + self.toSheet)
+        FreeCAD.Console.PrintMessage("\nself.useContent " + str(self.useContent))
+        FreeCAD.Console.PrintMessage("\nself.useAlias " + str(self.useAlias))
+        FreeCAD.Console.PrintMessage("\nself.useFormatting " + str(self.useFormatting))
+        FreeCAD.Console.PrintMessage("\nFrom :")
+        for aRow in self.fromCellsByRows:
+            cellRow = self.fromCellsByRows[aRow]
+            for aCell in cellRow: 
+                FreeCAD.Console.PrintMessage("\n")
+                FreeCAD.Console.PrintMessage(aCell + ":")
+                FreeCAD.Console.PrintMessage(cellRow[aCell])
+        FreeCAD.Console.PrintMessage("\nTo :")
+        for aRow in self.toCellsByRows:
+            cellRow = self.toCellsByRows[aRow]
+            for aCell in cellRow: 
+                FreeCAD.Console.PrintMessage("\n")
+                FreeCAD.Console.PrintMessage(aCell + ":")
+                FreeCAD.Console.PrintMessage(cellRow[aCell])
+
+#================================================
+class myRB(QtGui.QRadioButton):
+    def __init__(self, sheet, doco):
+        super().__init__(sheet)
+        self.doco = doco
+
+#================================================
+class myLabel(QtGui.QLabel):
+    def __init__(self, doco):
+        super().__init__(doco)
+        self.font = self.font()
+        self.font.setPointSize(10)
+        self.font.setWeight(100)
+        self.font.setStyle(QtGui.QFont.StyleItalic)
+        self.setFont(self.font)            
+#================================================
+class assistantPanel:
+    def __init__(self, dataClass):
+
+        self.path_to_ui = FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Macro").GetString("MacroPath") + "/spreadSheetAssistant.ui"
+        self.form = FreeCADGui.PySideUic.loadUi(self.path_to_ui)
+
+        self.DC = dataClass
+
+        self.setAction()
+        self.form.copyAction.clicked.connect(self.setAction)
+        self.form.moveAction.clicked.connect(self.setAction)
+        self.form.deleteAction.clicked.connect(self.setAction)
+
+        for doco in self.DC.activeSheets:      
+            self.form.sheetsFrom.addWidget(myLabel(doco))
+            self.form.sheetsTo.addWidget(myLabel(doco))
+
+            sheetRow = self.DC.activeSheets[doco]
+            for sheet in sheetRow:
+
+                self.DC.fromRB = myRB(sheet, doco)
+                self.DC.fromRB.clicked.connect(self.fromButtonClicked)
+                self.form.sheetsFrom.addWidget(self.DC.fromRB)
+                self.DC.fromSheetsGroup.addButton(self.DC.fromRB)
+
+                self.DC.toRB = myRB(sheet, doco)
+                self.DC.toRB.clicked.connect(self.toButtonClicked)
+                self.form.sheetsTo.addWidget(self.DC.toRB)
+                self.DC.toSheetsGroup.addButton(self.DC.toRB)
+
+
+        self.DC.setOptions(self.form.useContents.isChecked(), self.form.useAlias.isChecked(), self.form.useFormatting.isChecked())
+
+    def fromButtonClicked(self):
+        self.DC.fromSheet = self.DC.fromSheetsGroup.checkedButton().text()
+        self.DC.fromDoco = self.DC.fromSheetsGroup.checkedButton().doco
+        self.DC.getSelection("from")
+
+    def toButtonClicked(self):
+
+        self.DC.toSheet = self.DC.toSheetsGroup.checkedButton().text()
+        self.DC.toDoco = self.DC.toSheetsGroup.checkedButton().doco
+        self.DC.getSelection("to")
+
+    def setAction(self):
+        if self.form.moveAction.isChecked():
+            self.DC.selectedAction = "Move"
+        elif self.form.deleteAction.isChecked():
+            self.DC.selectedAction = "Delete"
+        else:
+            self.DC.selectedAction = "Copy"
+
+    def getResponse(self, msg = "", bLabel = "Review"):
+        fromMsg = self.DC.fromDoco + "/" + self.DC.fromSheet
+        toMsg = self.DC.toDoco + "/" + self.DC.toSheet
+        if msg == "":            
+            msg = self.DC.selectedAction + "\nfrom " + fromMsg
+            if not self.DC.selectedAction == "Delete":
+                msg = msg + "\n  to " + toMsg
+
+        responseBox = QtGui.QMessageBox()
+        responseBox.setIcon(QtGui.QMessageBox.Question)
+        responseBox.setWindowTitle(bLabel + ' or Cancel!')
+        responseBox.setText(msg)
+        responseBox.setStandardButtons(QtGui.QMessageBox.Yes|QtGui.QMessageBox.No)
+        reviewButton = responseBox.button(QtGui.QMessageBox.Yes)
+        reviewButton.setText(bLabel)
+        cancelButton = responseBox.button(QtGui.QMessageBox.No)
+        cancelButton.setText("Cancel")
+        return responseBox.exec_()
+
+    def endIt(self):
+        self.form.close()
+        FreeCADGui.Control.closeDialog() 
+
+    def accept(self): 
+        if self.DC.fromSheet == "" and self.DC.toSheet == "":
+            msg = "no selections found"
+            if not self.getResponse(msg) == QtGui.QMessageBox.Yes:
+                self.endIt()
+            return
+            
+ 
+        if self.DC.fromSheet == "" or len(self.DC.fromCellsByRows.values()) == 0:
+            msg = "no from selections found\n" + self.DC.fromDoco + "/" + self.DC.fromSheet
+            if not self.getResponse(msg) == QtGui.QMessageBox.Yes:
+                self.endIt()
+            else:
+                self.DC.fromSheetsGroup.setExclusive(False);
+                self.DC.fromSheetsGroup.checkedButton().setChecked(False)
+                self.DC.fromSheetsGroup.setExclusive(True);
+            return
+ 
+        if self.DC.selectedAction == "Delete":
+            if self.getResponse("", "Continue") == QtGui.QMessageBox.Yes:
+                self.DC.deleteSelection()
+                self.endIt()
+            return
+
+        if self.DC.toSheet == "" or len(self.DC.toCellsByRows.values()) == 0:
+            msg = "no target cell found\n" + self.DC.toDoco + "/" + self.DC.toSheet
+            if not self.getResponse(msg) == QtGui.QMessageBox.Yes:
+                self.endIt()
+            else:
+                self.DC.toSheetsGroup.setExclusive(False);
+                self.DC.toSheetsGroup.checkedButton().setChecked(False)
+                self.DC.toSheetsGroup.setExclusive(True);
+            return
+
+        if (self.DC.toSheet == self.DC.fromSheet and self.DC.toDoco == self.DC.fromDoco
+        and len(self.DC.toCellsByRows.values()) == len(self.DC.fromCellsByRows.values())
+        and list(list(self.DC.toCellsByRows.values())[0])[0] == list(list(self.DC.fromCellsByRows.values())[0])[0]):
+            msg = ("to and from sheets are the same:-\n" + self.DC.toDoco + "/" + self.DC.toSheet + " = " +
+            self.DC.fromDoco + "/" + self.DC.fromSheet)
+            if not self.getResponse(msg) == QtGui.QMessageBox.Yes:
+                self.endIt()
+            else:
+                self.DC.toDoco = ""
+                self.DC.toSheet = ""
+                self.DC.toCellsByRows = {}
+                self.DC.toSheetsGroup.setExclusive(False);
+                self.DC.toSheetsGroup.checkedButton().setChecked(False)
+                self.DC.toSheetsGroup.setExclusive(True);
+            return
+
+        if self.DC.selectedAction == "Copy": 
+            if self.getResponse("", "Continue") == QtGui.QMessageBox.Yes:
+                self.DC.setToSheet()
+                self.endIt()
+            return
+
+        if self.DC.selectedAction == "Move":
+            if self.getResponse("", "Continue") == QtGui.QMessageBox.Yes:
+                self.DC.deleteSelection() 
+                self.DC.setToSheet()
+                self.endIt()
+            return
+
+
+#==================================================
+
+
+DC = dataClass()
+  
+panel = assistantPanel(DC)
+FreeCADGui.Control.showDialog(panel)
