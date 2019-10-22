@@ -68,7 +68,6 @@ class dataClass():
                 docoName = docoName[:ii]
 
             if i.widget().metaObject().className() == "SpreadsheetGui::SheetView":
-                FreeCAD.Console.PrintMessage(i.widget().propertySheet)
                 sheetName = i.widget().windowTitle()
                 ii = sheetName.find("[")
                 sheetName = sheetName[:ii]
