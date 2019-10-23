@@ -7,14 +7,15 @@ __Comment__ = "This macro does stuff with spreadsheets"
 __Status__ = "unknown"
 __Requires__ = "FreeCAD 0.18"
 
-import sys
-sys.path.append("'C:\\Program Files\\FreeCAD 0.18\\lib'")
 
 import FreeCAD
 import FreeCADGui
 
 from PySide2 import *
 from PySide import *
+
+import sys
+sys.path.append("'C:\\Program Files\\FreeCAD 0.18\\lib'")
 
 import string
 
